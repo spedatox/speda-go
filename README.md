@@ -1,115 +1,254 @@
-# Heartbreaker Core
+# SPEDA GO
 
-Native Android (Kotlin + Jetpack Compose) port of the Heartbreaker desktop client,
-targeting a 1:1 visual/UX parity with the sub-768px web layout. See
-[`docs/ANDROID_PORT_PLAN.md`](../../docs/ANDROID_PORT_PLAN.md) for the full plan
-and the parity contract.
+**The Mark VI mobile UI.** A native Android client for SPEDA — Kotlin, Jetpack
+Compose, no WebView shell, no Flutter, no React Native. It talks to your own
+[Igor](#the-backend-it-talks-to) backend over HTTPS and streams turns over SSE,
+and it wears the same Stark fluid-glass hologram interface as the desktop client
+— same tokens, same material, same motion, same copy.
 
-This package is **inert to the GitOps prod deploy** — the server never runs
-Gradle, so nothing here is built or shipped by the backend.
-
-## Status — M0 (Foundation) + M1 (Chat core)
-
-### M1 — Chat core
-
-| Area | Where | Source of truth |
-|---|---|---|
-| Chat models + 19-action reducer | `app/.../domain/ChatModels.kt`, `ChatState.kt` | `store/chat.ts` |
-| Segment interleaving (buildSegments) | `app/.../domain/Segmenter.kt` | `Message.tsx` |
-| Tool status / summary / typewriter / watchdog | `app/.../domain/{ToolStatus,Watchdog}.kt` | `Message.tsx`, `ChatMain.tsx` |
-| SSE client + endpoints | `app/.../data/IgorApi.kt`, `SseEvent.kt` | `lib/api.ts` |
-| Offline transcript cache | `app/.../data/MessageCache.kt`, `MessageJson.kt` | `store/messageCache.ts` |
-| Streaming engine (coalesce / watchdog / reattach / abort-on-switch / title poll) | `app/.../ui/chat/ChatViewModel.kt` | `ChatMain.tsx` |
-| Chat UI (list, typewriter, tool feed, working status, composer, sessions) | `app/.../ui/chat/*` | `Message.tsx`, `InputBar.tsx` |
-
-M1 renders text as plain prose; the full markdown/prose renderer, rich fences,
-files/images and the real sidebar/header land in M2/M3. The token gallery
-(`ui/gallery`) remains as the design-system reference surface.
-
-**Parity verification done here:** `buildSegments` fixtures generated from a
-verbatim copy (`scripts/gen-chat-fixtures.ts` → `segments.json`), asserted by
-`SegmenterTest`; the 19-action reducer's subtle rules covered by `ReducerTest`.
-
-## Status — M0 (Foundation)
-
-Implemented, grounded value-for-value in `packages/heartbreaker/src/renderer/src`
-(the parity source of truth):
-
-| Area | Where | Source of truth |
-|---|---|---|
-| Colour math + theme engine | `designsystem/.../color`, `.../theme` | `profile/theme.ts` |
-| Base token tables | `designsystem/.../theme/BaseTokens.kt` | `profile/theme.ts`, `theme/heartbreaker.css` |
-| Brands / roster / party colours | `designsystem/.../brand/Brands.kt` | `profile/brands.ts`, `warroom.ts`, `lib/agents.ts` |
-| Accent morph + House Party parade | `designsystem/.../theme/HbTheme.kt` | `theme.ts` `morphTheme` / `startPartyCycle` |
-| The ONE glass material + seams | `designsystem/.../glass` | `.glass` / `.hb-seam-*` in `heartbreaker.css` |
-| Ambient background | `designsystem/.../background/AmbientBackground.kt` | `components/NeuralBackground.tsx` |
-| Typography ramp | `designsystem/.../type/HbType.kt` | `heartbreaker.css` |
-| Motion tokens | `designsystem/.../motion/Motion.kt` | `theme.ts` + CSS |
-| Uplink setup (Keystore) | `app/.../data`, `app/.../ui/UplinkSetupScreen.kt` | replaces Electron env config |
-| `/health` poller + bare HUD strip | `app/.../data/HealthPoller.kt`, `ui/HudStrip.kt` | `lib/useHealth.ts`, `HudFrame.tsx` |
-| Token-gallery reference screen | `app/.../ui/gallery/TokenGalleryScreen.kt` | plan M0 acceptance surface |
-
-### Parity verification already done here
-
-- **Theme fixtures generated from the shipping TS**:
-  `node --experimental-strip-types packages/heartbreaker/scripts/gen-theme-fixtures.ts`
-  → `designsystem/src/test/resources/fixtures/theme_vars.json` (9 agents).
-- **`ThemeEngineTest`** asserts the Kotlin engine reproduces `buildThemeVars` /
-  `deriveAccents` byte-for-byte (runs on the JVM, no device).
-- The engine algorithm was cross-checked independently (369 assertions across 9
-  agents, all matching) — see the port notes. Rounding uses `floor(x+0.5)` to
-  match JS `Math.round`, **not** Kotlin's banker's `round`.
-
-## Build status
-
-**Green.** The whole project compiles, the unit tests pass, and `assembleDebug`
-produces an installable APK. Verified on this box with Android Studio's bundled
-JBR (JDK 21) + Gradle 8.11.1 + AGP 8.9.0:
-
-| Module | Test | Tests | Failures |
-|---|---|---|---|
-| designsystem | `ThemeEngineTest` (theme parity, 9 agents) | 3 | 0 |
-| app | `SegmenterTest` (buildSegments fixtures) | 1 | 0 |
-| app | `ReducerTest` (the 19-action store) | 8 | 0 |
-
-Android Studio syncs straight from `gradle/wrapper/gradle-wrapper.properties`
-(Gradle 8.11.1). To build from this shell without the IDE:
-
-```bash
-export JAVA_HOME="/c/Program Files/Android/Android Studio/jbr"
-export ANDROID_HOME="$LOCALAPPDATA/Android/Sdk"
-GRADLE=~/.gradle/wrapper/dists/gradle-8.11.1-bin/*/gradle-8.11.1/bin/gradle
-$GRADLE :designsystem:testDebugUnitTest :app:testDebugUnitTest :app:assembleDebug
+```
+Kotlin 2.1  ·  Compose (BOM 2025.01)  ·  minSdk 31  ·  targetSdk 35  ·  AGP 8.9  ·  Gradle 8.11.1
 ```
 
-Note: `gradlew`/`gradle-wrapper.jar` are **not** committed (only the
-`.properties`), so there is no `./gradlew`. Android Studio doesn't need it; run
-`gradle wrapper` once if you want the CLI script.
+Single-user by design. There is no sign-up, no account server, no telemetry:
+first launch asks for your backend URL and your API key, and that key is wrapped
+by the Android Keystore and never leaves the device.
 
-### Gotcha that already bit once
+---
 
-A batch of jars in `~/.gradle/caches/modules-2` downloaded **corrupt**
-(right byte-count, zero-padded tail, no ZIP end header). Symptom was a very
-misleading `Could not apply requested plugin [id: 'com.android.application'] …
-does not provide a plugin with id` — nothing to do with the AGP/Gradle versions.
-Gradle names each cache folder after the artifact's SHA-1, so the cache is
-self-verifying; compare `sha1sum <jar>` to its parent folder name (Gradle strips
-leading zeros), delete the mismatching module dirs, and re-resolve. Afterwards
-clear the stale script caches (`.gradle/`, `~/.gradle/caches/8.11.1/kotlin-dsl`),
-or the build scripts stay compiled against the missing `android {}` DSL.
+## What it is
 
-### Still open
+SPEDA (Specialized Personal Executive Digital Assistant) is a proactive ambient
+assistant with a roster of specialist agents — SPEDA, Sentinel (finance),
+NightCrawler (OSINT), Ultron (academic), Centurion (security), Atomix (health),
+Optimus, Orion, and the War Room. The backend and the desktop client live in the
+`speda-mark6` monorepo; **this repo is the phone.**
 
-- **Not run on a device**, and the §7 **visual-parity ritual has not been done** —
-  no screenshot diff against the web yet. Correctness is asserted only by the
-  unit tests above.
-- ~~Fonts~~ — **done**: Rajdhani + Inter + JetBrains Mono are bundled in
-  `designsystem/src/main/res/font` and wired in `HbFonts`. See `docs/FONTS.md`.
-- **Cleartext** — `res/xml/network_security_config.xml`: add the prod host only if
-  its `apiBase` is plain `http://`.
+It was split out of `packages/heartbreaker-android` with its full commit history
+intact, so `git log` here is the real record of the port, not a squashed dump.
 
-## Next
+The port's governing rule: **the sub-768px web layout is the mobile spec.** The
+desktop client already ships a complete mobile adaptation — off-canvas frosted
+drawer, HUD strip with DIAG dropdown, composer overflow menu, sticky composer,
+44dp touch targets. Android replicates *that*, value for value, rather than
+reinterpreting the desktop layout. Pure logic (the chat reducer, the segment
+builder, the theme math, the markdown pre-processors) was transliterated from the
+TypeScript and locked with fixtures generated from the originals — see
+[Parity is tested, not claimed](#parity-is-tested-not-claimed).
 
-M2 (Rich content) per the plan: markdown renderer + prose styles, code blocks,
-math, chart/calendar fences, WebView widgets, file cards + downloads, image
-attachments + lightbox, doc uploads, voice input + read-aloud.
+---
+
+## Features
+
+### Chat
+- **Live SSE streaming** with per-frame chunk coalescing and a typewriter reveal
+  that catches up exponentially (`speed = max(45, remaining × 7)` chars/s).
+- **Detached runs.** A turn keeps going server-side when you switch sessions,
+  background the app, or lose signal; the app re-attaches on return via
+  `/chat/active` → `/chat/attach/{id}`.
+- **A watchdog with an opinion.** 15s stall → a status line naming the model,
+  300s dead → abort with a phase-specific diagnostic (no-start / tool-stuck /
+  no-tokens), never a bare spinner.
+- **Tool feed** — verb + target rows that expand into red/green edit diffs,
+  `$ command` + output, or key:value + result, interleaved at the exact character
+  offset in the reply where each tool fired.
+- **Offline transcripts.** Every settled turn is cached per `(agent, session)`
+  and rehydrated instantly on open; the server wins on refresh unless it comes
+  back empty.
+- Rename / delete sessions, regenerate, edit-and-resend, copy, and read-aloud via
+  on-device TTS.
+
+### Rich content
+| Fence / syntax | Rendered as |
+|---|---|
+| Markdown | Native Compose prose — accent header plates, `MAIN_SUB` underscore split, `▸` list markers, chip-styled inline code, data-grid tables, boxed source chips |
+| ` ```chart ` | Stark line / area / bar / pie charts |
+| ` ```calendar ` | Holographic week view with HUD ring and event chips |
+| ` ```map ` | Interactive MapLibre GL vector map on a dark basemap we own — no Play Services |
+| ` ```svg ` | AndroidSVG → Compose Canvas, crisp at any zoom |
+| Code fences | Glass code block, language header, copy |
+| `$…$` / `$$…$$` | KaTeX (bundled offline) with currency-`$` protection |
+| Files & images | Download cards filed under `Documents/Speda Mark VI`, image thumbnails, uploads as chips |
+
+Partial fences stream safely: an incomplete chart or calendar shows a quiet
+`MATERIALIZING` placeholder instead of a parse error flickering mid-frame.
+
+### The roster
+- **Agent switcher** (the armoury overlay) — counter-rotating HUD rings, staggered
+  pod boot, lock-in flare, then a 500ms palette morph into the new agent's colour.
+- **Comms** — the inter-agent message tray: who dispatched what to whom, live
+  `WORKING… Ns` elapsed timers, threaded replies, broadcast/HP tags.
+- **Systems board** — uplink telemetry, the `ROUTING_MATRIX` model tiles (tap to
+  route the active model), per-agent core pins, MCP context shards, token-budget
+  gauge, RTT trace, and the knowledge bank with revision history and restore.
+- **House Party Protocol** — the all-hands mode, passphrase-gated, with the full
+  ignite / stand-down cinematic.
+
+### Settings
+Eight tabs: General, Configuration (the backend's own typed config schema,
+masked secrets, applied-live vs restart-required), Connections (Google / Notion
+OAuth, MCP toggles), Automations (n8n + Telegram), Health, Interface, Data
+(import a Claude export, index history), Account.
+
+### Android exclusives
+- **Health sync (Atomix).** Health Connect → Igor on a 4-hour WorkManager cadence,
+  read-only: steps, distance, sleep, heart rate, resting HR, exercise, weight,
+  body fat, SpO₂. Every type is approved by you in Health Connect's own system
+  sheet — declaring the permission grants nothing.
+- **Location awareness**, opt-in behind a Settings toggle, so the assistant knows
+  where "near me" is.
+- Edge-to-edge AMOLED black, real backdrop refraction (Haze), and glass that
+  degrades by design to the occluding-fill fallback where nested blur is
+  cancelled.
+
+---
+
+## Architecture
+
+```
+speda-go/
+├── app/                                   # the application module
+│   └── src/main/kotlin/com/speda/heartbreaker/
+│       ├── data/        # IgorApi (SSE + REST), Keystore-wrapped uplink store,
+│       │                # settings/agents DTOs, message cache, downloader, health poller
+│       ├── domain/      # pure Kotlin, no Android: the 19-action chat reducer,
+│       │                # buildSegments, markdown prep, math extract, partial-JSON,
+│       │                # chart/calendar/map specs, polyline, watchdog, tool status
+│       ├── health/      # Health Connect source + sync manager + WorkManager worker
+│       └── ui/          # chat, prose, settings, shell, comms, systems, switcher, gallery
+└── designsystem/                          # the Stark language, as a library module
+    └── src/main/kotlin/com/speda/heartbreaker/designsystem/
+        ├── theme/       # colour math, base token tables, the theme engine, palette morph
+        ├── glass/       # THE ONE glass material + etched seams + haze
+        ├── brand/       # the roster: names, accents, marks, taglines
+        ├── background/  # the ambient blob field that re-hues per agent
+        ├── type/        # Rajdhani / Inter / JetBrains Mono ramp (bundled, OFL)
+        ├── motion/      # motion tokens
+        └── icons/       # the glyph set
+```
+
+Two rules hold the shape:
+
+1. **One glass material.** Exactly one `Modifier.hbGlass()` implementation. Every
+   surface uses it with thin state modifiers (tint / active / amber / ghost /
+   round) — never a per-component recipe.
+2. **Zero identity strings outside `brand/`.** Agent names, accents and taglines
+   live in `Brands.kt` and nowhere else, mirroring the backend's own Rule 10.
+
+The theme engine takes one accent hex and derives the entire palette: bright =
+mix 28% white, dim = mix 62% void, `rehue()` keeps S/L and swaps hue across the
+base token tables. Switching agents morphs that palette over 500ms, easing
+`easeInOutQuad`, rebuilt every frame.
+
+---
+
+## Getting started
+
+**You need:** Android Studio (Ladybug or newer) or a JDK 17+ toolchain, the
+Android SDK (compileSdk 35), and a reachable Igor backend.
+
+```bash
+git clone https://github.com/spedatox/speda-go
+cd speda-go
+./gradlew :designsystem:testDebugUnitTest :app:testDebugUnitTest :app:assembleDebug
+```
+
+The APK lands in `app/build/outputs/apk/debug/`. `local.properties` is
+gitignored — Android Studio writes your `sdk.dir` on first sync; from the CLI,
+export `ANDROID_HOME` instead.
+
+Building from a plain shell (no IDE) with Android Studio's bundled JBR:
+
+```bash
+JAVA_HOME="/c/Program Files/Android/Android Studio/jbr" ANDROID_HOME="$LOCALAPPDATA/Android/Sdk" ./gradlew :app:assembleDebug
+```
+
+### First run
+
+The app opens on **ESTABLISH UPLINK** and asks for two things:
+
+| Field | Value |
+|---|---|
+| `API BASE` | `https://your-host:port` — where Igor is listening |
+| `API KEY` | your `SPEDA_API_KEY`; sent as `X-API-Key` on every request |
+
+The key is stored via `UplinkStore`, wrapped by an Android Keystore-held AES key.
+It is never logged, never synced, and `allowBackup` is off.
+
+If your backend is plain `http://`, add that host to
+`app/src/main/res/xml/network_security_config.xml` — cleartext is denied by
+default and there is no global opt-out in this build.
+
+### Release builds
+
+R8 + resource shrinking are on; the signing config is commented out in
+`app/build.gradle.kts` because this is a personal, single-user app with no Play
+Store presence. Wire your own keystore there — `*.jks`, `*.keystore` and
+`keystore.properties` are all gitignored, deliberately.
+
+---
+
+## Parity is tested, not claimed
+
+Everything transliterated from the TypeScript is asserted against fixtures
+generated from the shipping web client, so drift shows up as a red test rather
+than as a slightly-wrong pixel:
+
+| Module | Test | Covers |
+|---|---|---|
+| designsystem | `ThemeEngineTest` | `buildThemeVars` / `deriveAccents` reproduced for all 9 agents (369 assertions in the original cross-check) |
+| designsystem | `AgentMarksTest` | the roster's marks |
+| app | `SegmenterTest` | `buildSegments` tool-interleaving against generated fixtures |
+| app | `ReducerTest` | the 19-action chat store, including the SELECT_SESSION-during-stream race |
+| app | `MarkdownPrepTest` | the markdown pre-processors |
+| app | `MathExtractTest` | math extraction and the currency-`$` guard |
+| app | `MapSpecTest` | ` ```map ` fence parsing |
+
+One hard-won detail worth keeping: rounding uses `floor(x + 0.5)` to match
+JavaScript's `Math.round`, **not** Kotlin's banker's `round`. Swap it and the
+palette drifts by a bit per channel.
+
+---
+
+## The backend it talks to
+
+Every call carries `X-API-Key`. The surface this client consumes:
+
+- **Chat** — `POST /chat/{agent_id}` (SSE: `start|chunk|tool|tool_result|file|done|error`),
+  `GET /chat/attach/{request_id}`, `GET /chat/active`, `POST /chat/cancel/{request_id}`,
+  `GET /welcome/{agent_id}`
+- **Sessions** — `GET /sessions`, `GET /sessions/{id}/messages`, `PATCH`, `DELETE`
+- **Models** — `GET /models`, `GET|POST /agents/models`, `/agents/legion-models`
+- **Agents** — `GET /agents`, `GET /agents/comms`, `GET|POST /agents/house-party`
+- **Memory** — `GET|PUT /memory/files` (409 optimistic concurrency),
+  `/memory/files/revisions`, `/memory/files/restore`, `/memory/sources`
+- **Health** — `POST /health/data`, `GET /health/status`, `GET /health`
+- **Ops** — `GET|PUT /config`, `GET|POST /budget-mode`, `GET|POST /connections`,
+  `/automations*`, `/admin/index-history`
+
+No backend change is required to run this client against a stock Mark VI.
+
+---
+
+## Status
+
+Shipped: the design system, the chat core, the full prose/rich-content renderer,
+files and images, settings, the systems board, comms, the agent switcher, maps,
+and Health Connect sync. Build is green — both modules compile, the unit suites
+pass, and `assembleDebug` produces an installable APK.
+
+Open: voice input in the composer (read-aloud already works), push notifications,
+and the screenshot-diff visual-parity ritual against the web build — today
+correctness is asserted by the unit tests above, not by pixel diffing.
+
+---
+
+## Relationship to the monorepo
+
+This repo is a `git subtree split` of `packages/heartbreaker-android` in
+`speda-mark6`. It carries that path's history and stands alone: its own Gradle
+build, its own version catalog, no monorepo tooling required. Fixes can travel
+back the same way they came.
+
+Personal project. No warranty, no support, and nothing here is intended for
+distribution.

@@ -1,9 +1,9 @@
 /*
- * Heartbreaker Droid — the native Android port of the Heartbreaker desktop client.
+ * SPEDA GO — the native Android client for SPEDA Mark VI.
  *
- * This is a SELF-CONTAINED Gradle build that lives inside the speda-mark6 monorepo
- * but is inert to the GitOps prod deploy: the server never runs Gradle, so nothing
- * here is built or shipped by the backend. See docs/ANDROID_PORT_PLAN.md.
+ * A self-contained Gradle build. It was split out of the speda-mark6 monorepo
+ * (packages/heartbreaker-android) with its history intact and is inert to the
+ * backend's GitOps deploy: the server never runs Gradle.
  */
 pluginManagement {
     repositories {
@@ -27,7 +27,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "heartbreaker-android"
+rootProject.name = "speda-go"
 
 include(":app")
 include(":designsystem")
