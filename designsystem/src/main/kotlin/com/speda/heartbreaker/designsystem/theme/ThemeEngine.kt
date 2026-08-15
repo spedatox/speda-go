@@ -18,8 +18,8 @@ object ThemeEngine {
     /** Derive the bright (active) and dim shades from a single accent hex. */
     fun deriveAccents(accent: String): Accents = Accents(
         accent = accent,
-        bright = ColorMath.mixWhite(accent, 0.28),
-        dim = ColorMath.mixVoid(accent, 0.62),
+        bright = ColorMath.mixWhite(accent, 0.32),
+        dim = ColorMath.mixVoid(accent, 0.32),
     )
 
     /**
@@ -81,7 +81,9 @@ object ThemeEngine {
             iconBright = hex("--hb-icon-bright"),
             line = rgba("--hb-line"),
             lineBright = rgba("--hb-line-bright"),
-            edge = rgba("--hb-edge"),
+            // The resting rim is a fixed neutral white, never re-hued — it is
+            // not in the token map at all (see BaseTokens.EDGE).
+            edge = parseRgba(BaseTokens.EDGE),
             edgeBright = rgba("--hb-edge-bright"),
             bgSidebar = rgba("--bg-sidebar"),
             bgHover = rgba("--bg-hover"),
@@ -90,6 +92,7 @@ object ThemeEngine {
             scrollbarThumb = rgba("--scrollbar-thumb"),
             scrollbarThumbHover = rgba("--scrollbar-thumb-hover"),
             glassTint = rgba("--glass-tint"),
+            glassTint2 = rgba("--glass-tint-2"),
             glassTintHi = rgba("--glass-tint-hi"),
             glassFill = rgba("--glass-fill"),
             glassMenu = rgba("--glass-menu"),
