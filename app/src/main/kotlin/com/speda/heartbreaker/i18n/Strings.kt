@@ -25,6 +25,7 @@ data class AppStrings(
     val composer: Composer,
     val voiceActivity: VoiceActivity,
     val fileCard: FileCard,
+    val thinkingLevel: ThinkingLevel,
     val message: Message,
     val commsTray: CommsTray,
     val sidebar: Sidebar,
@@ -116,10 +117,22 @@ data class AppStrings(
         val saved: String,
     )
 
+    data class ThinkingLevel(
+        /** Level id -> label. Keys are llm_client.THINKING_LEVELS. */
+        val names: Map<String, String>,
+        /** Shown instead of a level when the provider exposes no control. */
+        val na: String,
+    )
+
     data class Message(
         val saveAndSend: String,
         val somethingWentWrong: String,
         val thinking: String,
+        /** Waiting lines, escalating with how long the turn has stayed silent.
+         *  One band per THINKING_BAND_MS, re-rolled every THINKING_LINE_MS, last
+         *  band repeating forever. Each line carries its own punctuation — some
+         *  are questions, and a blanket trailing ellipsis reads wrong on those. */
+        val thinkingPhases: List<List<String>>,
         val thinkingPanel: ThinkingPanel,
     )
 
