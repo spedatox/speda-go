@@ -107,6 +107,7 @@ fun reduce(state: ChatState, action: ChatAction): ChatState = when (action) {
     }
 
     is ChatAction.TagMessageSession -> state.copy(
+        activeSessionId = state.activeSessionId ?: action.sessionId,
         messages = state.messages.map { m ->
             if (m.id == action.id) m.copy(sessionId = action.sessionId) else m
         }.toPersistentList(),
@@ -230,27 +231,34 @@ fun reduce(state: ChatState, action: ChatAction): ChatState = when (action) {
                                 }
                             }
                         }
-                        "tool" -> run = run.copy(
-                            steps = (
-                                run.steps + SubagentStep(
-                                    kind = "tool",
-                                    tool = e["tool"]?.jsonPrimitive?.contentOrNull,
-                                    input = e["input"],
-                                    toolCallId = e["tool_call_id"]?.jsonPrimitive?.contentOrNull,
+                        "tool" -> {
+                            val toolCallId = e["tool_call_id"]?.jsonPrimitive?.contentOrNull
+                            if (toolCallId != null) {
+                                run = run.copy(
+                                    steps = (
+                                        run.steps + SubagentStep(
+                                            kind = "tool",
+                                            tool = e["tool"]?.jsonPrimitive?.contentOrNull,
+                                            input = e["input"],
+                                            toolCallId = toolCallId,
+                                        )
+                                        ).toPersistentList(),
                                 )
-                                ).toPersistentList(),
-                        )
+                            }
+                        }
                         "tool_result" -> {
                             val toolCallId = e["tool_call_id"]?.jsonPrimitive?.contentOrNull
-                            val i = run.steps.indexOfLast {
-                                it.kind == "tool" && it.result == null &&
-                                    (toolCallId == null || it.toolCallId == toolCallId)
-                            }
+                            val i = if (toolCallId != null) run.steps.indexOfFirst {
+                                it.kind == "tool" && it.toolCallId == toolCallId
+                            } else -1
                             if (i >= 0) {
                                 run = run.copy(
                                     steps = run.steps.set(
                                         i,
-                                        run.steps[i].copy(result = e["result"]?.jsonPrimitive?.contentOrNull),
+                                        run.steps[i].copy(
+                                            result = e["error"]?.jsonPrimitive?.contentOrNull
+                                                ?: e["result"]?.jsonPrimitive?.contentOrNull,
+                                        ),
                                     ),
                                 )
                             }
@@ -277,7 +285,7 @@ fun reduce(state: ChatState, action: ChatAction): ChatState = when (action) {
         } else {
             state.copy(
                 isStreaming = false,
-                activeSessionId = action.sessionId,
+                activeSessionId = if (action.sessionId != 0) action.sessionId else state.activeSessionId,
                 messages = state.messages.map { m ->
                     if (m.id == action.id) m.copy(isStreaming = false, status = null) else m
                 }.toPersistentList(),
