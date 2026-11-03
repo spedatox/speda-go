@@ -4,6 +4,7 @@
 package com.speda.heartbreaker.ui.shell
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -16,6 +17,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -25,14 +28,12 @@ import androidx.compose.ui.unit.sp
 import com.speda.heartbreaker.designsystem.glass.HbGlassShape
 import com.speda.heartbreaker.designsystem.glass.HbGlassState
 import com.speda.heartbreaker.designsystem.glass.hbGlass
-import com.speda.heartbreaker.designsystem.glass.hbHazeBlur
 import com.speda.heartbreaker.designsystem.glass.hbSeamBottom
 import com.speda.heartbreaker.designsystem.icons.HbGlyphs
 import com.speda.heartbreaker.designsystem.theme.LocalHbPalette
 import com.speda.heartbreaker.designsystem.type.HbType
 import com.speda.heartbreaker.i18n.LocalStrings
 import com.speda.heartbreaker.ui.HbText
-import dev.chrisbanes.haze.HazeState
 
 /**
  * The 40dp frosted header plate with a bottom seam — a port of Header.tsx at the
@@ -45,10 +46,11 @@ import dev.chrisbanes.haze.HazeState
  */
 @Composable
 fun AppHeader(
-    haze: HazeState,
     sessionTitle: String?,
     onToggleSidebar: () -> Unit,
     modifier: Modifier = Modifier,
+    onRoomActions: (() -> Unit)? = null,
+    roomActionsLabel: String = "Conversation participants",
 ) {
     val palette = LocalHbPalette.current
     val t = LocalStrings.current
@@ -56,7 +58,7 @@ fun AppHeader(
         modifier = modifier
             .fillMaxWidth()
             .height(40.dp)
-            .hbHazeBlur(haze, palette)
+            .background(palette.void)
             .hbSeamBottom()
             .padding(horizontal = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -77,6 +79,11 @@ fun AppHeader(
             title = sessionTitle?.ifBlank { null } ?: t.sidebar.newLink,
             modifier = Modifier.weight(1f, fill = false),
         )
+        if (onRoomActions != null) {
+            Box(Modifier.size(36.dp).semantics { contentDescription = roomActionsLabel }.clickable(onClick = onRoomActions), contentAlignment = Alignment.Center) {
+                HbText("···", style = HbType.headerBar, color = palette.iconBright)
+            }
+        }
     }
 }
 

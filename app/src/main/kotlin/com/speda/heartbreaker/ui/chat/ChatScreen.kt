@@ -19,7 +19,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -42,12 +41,14 @@ import com.speda.heartbreaker.data.IgorApi
 import com.speda.heartbreaker.data.ModelInfo
 import com.speda.heartbreaker.data.Uplink
 import com.speda.heartbreaker.designsystem.brand.Brands
-import com.speda.heartbreaker.designsystem.glass.LocalAmbientHazeState
-import com.speda.heartbreaker.designsystem.glass.LocalHazeState
-import com.speda.heartbreaker.designsystem.glass.hbHazeSource
 import com.speda.heartbreaker.domain.AppConfig
 import com.speda.heartbreaker.i18n.LocalStrings
 import com.speda.heartbreaker.ui.HudStrip
+import com.speda.heartbreaker.ui.HbGlassButton
+import com.speda.heartbreaker.ui.HbText
+import com.speda.heartbreaker.designsystem.type.HbType
+import com.speda.heartbreaker.designsystem.theme.LocalHbPalette
+import com.speda.heartbreaker.domain.ChatMessage
 import com.speda.heartbreaker.ui.comms.AgentCommsScreen
 import com.speda.heartbreaker.data.SkyfallArm
 import com.speda.heartbreaker.ui.skyfall.SkyfallCountdown
@@ -88,7 +89,6 @@ fun ChatScreen(
     agentId: String,
     onAgentChange: (String) -> Unit,
     onResetUplink: () -> Unit,
-    haze: dev.chrisbanes.haze.HazeState,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -102,8 +102,21 @@ fun ChatScreen(
     LaunchedEffect(config) { vm.onConfig(config) }
 
     val state by vm.state.collectAsStateWithLifecycle()
+    val viewScope by vm.viewScope.collectAsStateWithLifecycle()
     val settings by graph.settings.settings.collectAsStateWithLifecycle(initialValue = HbSettings())
     var replyQuotes by remember(config, state.activeSessionId, state.activeProjectId) { mutableStateOf<List<String>>(emptyList()) }
+    var replyTarget by remember(config, state.activeSessionId) { mutableStateOf<ChatMessage?>(null) }
+    var addressedAgent by remember(config, state.activeSessionId) { mutableStateOf<String?>(null) }
+    var roomActions by remember(config, state.activeSessionId) { mutableStateOf(false) }
+    val roomError by vm.roomError.collectAsStateWithLifecycle()
+    val roomConnection by vm.roomConnection.collectAsStateWithLifecycle()
+    val workerStatus by vm.workerStatus.collectAsStateWithLifecycle()
+    val membershipBusy by vm.membershipBusy.collectAsStateWithLifecycle()
+    val palette = LocalHbPalette.current
+    LaunchedEffect(state.room?.members) {
+        if (addressedAgent != null && addressedAgent !in state.room?.members.orEmpty()) addressedAgent = null
+        if (replyTarget?.speaker != null && replyTarget?.speaker !in state.room?.members.orEmpty()) replyTarget = null
+    }
     val health by remember(config) { graph.health.poll(config.apiBase, config.apiKey) }
         .collectAsStateWithLifecycle(initialValue = Health.Offline)
 
@@ -114,7 +127,6 @@ fun ChatScreen(
     // itself mid-turn, so the client reads it on entry and re-syncs after every
     // turn settles rather than trusting its own last write.
     var budgetMode by remember { mutableStateOf<Boolean?>(null) }
-    LaunchedEffect(config) { budgetMode = graph.api.getBudgetMode(config) }
     LaunchedEffect(config, state.isStreaming) {
         if (!state.isStreaming) budgetMode = graph.api.getBudgetMode(config)
     }
@@ -155,11 +167,10 @@ fun ChatScreen(
     }
 
     val voiceOn by vm.voiceOn.collectAsStateWithLifecycle()
-    val voiceState by vm.voiceState.collectAsStateWithLifecycle()
-    val voiceLevel by vm.voiceLevel.collectAsStateWithLifecycle()
     // The board's settings live on the backend so the agent's brief and the
     // surface that renders it cannot disagree about the window ceiling.
     var canvas by remember { mutableStateOf(CanvasSettings()) }
+    LaunchedEffect(canvas, voiceOn) { vm.canvasEnabled = canvas.enabled; vm.canvasMaxPanels = canvas.maxPanels }
     /** Which answer voice mode is showing; null follows the newest. A different
      *  session is a different set of answers, so a stale index there would land
      *  on someone else's turn. */
@@ -220,8 +231,8 @@ fun ChatScreen(
 
     // A NEW message (the owner's send, or the assistant's bubble appearing) is a
     // deliberate act — always bring the view down to it.
-    LaunchedEffect(state.messages.size) {
-        if (state.messages.isNotEmpty()) {
+    LaunchedEffect(voiceOn, state.activeSessionId, state.messages.size) {
+        if (!voiceOn && state.messages.isNotEmpty()) {
             listState.scrollToItem(state.messages.lastIndex, SCROLL_TO_END)
         }
     }
@@ -230,8 +241,8 @@ fun ChatScreen(
     // already at the bottom. Scrolling to the item index alone parks the
     // viewport on the message's FIRST line, so every chunk threw the reader back
     // to the top of the answer while the new text grew off-screen below.
-    LaunchedEffect(state.messages.lastOrNull()?.content?.length) {
-        if (atBottom && state.messages.isNotEmpty()) {
+    LaunchedEffect(voiceOn, state.messages.lastOrNull()?.content?.length, state.messages.lastOrNull()?.thinking?.length) {
+        if (!voiceOn && atBottom && state.messages.isNotEmpty() && !listState.isScrollInProgress) {
             listState.scrollToItem(state.messages.lastIndex, SCROLL_TO_END)
         }
     }
@@ -247,30 +258,26 @@ fun ChatScreen(
                 onAgentClick = { switcherOpen = true },
             )
             AppHeader(
-                haze = haze,
                 sessionTitle = activeTitle,
                 onToggleSidebar = { drawerOpen = true },
+                onRoomActions = if (state.activeSessionId != null) ({ roomActions = true }) else null,
+                roomActionsLabel = if (settings.locale == "tr") "Sohbet katılımcıları" else "Conversation participants",
             )
+            state.room?.takeIf { it.members.size > 1 }?.let { room ->
+                RoomMembers(room, addressedAgent, { addressedAgent = it }, { roomActions = true }, settings.locale == "tr")
+            }
 
-            // The transcript is ALSO a backdrop: the header, composer and drawer
-            // sit over it, so they must refract the text behind them — that's
-            // what makes them read as glass rather than tinted panels. (Blurring
-            // only the ambient shows nothing: a smooth gradient blurs to itself.)
-            Box(Modifier.weight(1f).fillMaxWidth().hbHazeSource(haze)) {
-                // Glass INSIDE this backdrop must not blur IT — it would sample
-                // the source it lives in, itself included. It refracts the
-                // ambient instead: strictly behind, never a feedback loop, and
-                // full of moving accent light, so bubbles are real frosted glass
-                // rather than the flat occluding-fill fallback.
-                CompositionLocalProvider(LocalHazeState provides LocalAmbientHazeState.current) {
+            // No transcript capture: every glass surface uses the inexpensive fill.
+            Box(Modifier.weight(1f).fillMaxWidth()) {
                     // Voice mode REPLACES the transcript rather than sitting
                     // beside it. The point of the mode is that the owner is
                     // listening, not reading a scrollback — so what shows is the
                     // current answer's evidence and the words as they are said.
                     if (voiceOn) {
-                        val answers = state.messages.filter {
-                            it.role == com.speda.heartbreaker.domain.Role.Assistant
+                        val answers = remember(state.messages) {
+                            state.messages.filter { it.role == com.speda.heartbreaker.domain.Role.Assistant && it.roomNotice == null && !it.isWorkerAnchor }
                         }
+                        val voiceState by vm.voiceState.collectAsStateWithLifecycle()
                         // null pins to the NEWEST, and that is the default rather
                         // than a stored index: a live turn has to keep arriving on
                         // screen, and an index would have to be chased forward
@@ -286,17 +293,22 @@ fun ChatScreen(
                             // as live would spin its activity card for ever.
                             streaming = state.isStreaming && idx == answers.size - 1,
                             state = voiceState,
-                            level = voiceLevel,
+                            level = vm.voiceLevel,
                             captionLines = canvas.captionLines,
                             maxPanels = canvas.maxPanels,
                             activityAfterMs = canvas.activityAfterMs,
+                            canvasEnabled = canvas.enabled,
                             answerIndex = idx,
                             answerCount = answers.size,
                             onAnswer = { i ->
+                                vm.stopSpeaking()
                                 // Landing on the newest re-pins, so the board
                                 // resumes following the conversation.
                                 voicePin = if (i >= answers.size - 1) null else i.coerceAtLeast(0)
                             },
+                            canReplay = live != null && live.content.isNotBlank() && !state.isStreaming,
+                            onReplay = { live?.let { vm.replayVoice(it.id) } },
+                            onStopSpeaking = vm::stopSpeaking,
                         )
                     } else if (state.messages.isEmpty()) {
                         WelcomeView(
@@ -311,13 +323,16 @@ fun ChatScreen(
                             modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp),
                             contentPadding = PaddingValues(vertical = 12.dp),
                         ) {
-                            items(state.messages, key = { it.id }) { message ->
+                            items(state.messages, key = { it.id }, contentType = { it.role }) { message ->
                                 ReplySelection(onSelect = { quote -> if (quote !in replyQuotes) replyQuotes = replyQuotes + quote }, turkish = settings.locale == "tr") {
                                     MessageItem(
                                         message,
                                         config = config,
                                         downloader = graph.downloader,
+                                        api = graph.api,
                                         showThinking = settings.showThinking,
+                                        turkish = settings.locale == "tr",
+                                        onReply = if (message.roomSequence != null && message.roomNotice == null && !message.isWorkerAnchor) ({ replyTarget = message }) else null,
                                         onDelete = { vm.deleteMessage(message.id) },
                                         onRegenerate = if (message.role == com.speda.heartbreaker.domain.Role.Assistant) {
                                             { vm.regenerate(message.id, turnOpts(settings)) }
@@ -330,7 +345,6 @@ fun ChatScreen(
                             }
                         }
                     }
-                }
             }
 
             // A peer's safety gate is waiting on an irreversible operation.
@@ -338,6 +352,10 @@ fun ChatScreen(
             // Skyfall gets its own screen: the decision is answered by a button,
             // not by scrolling to find it.
             val fastArrivalAsk by vm.pendingAsk.collectAsStateWithLifecycle()
+            (roomError ?: roomConnection ?: workerStatus)?.let { HbText(it, style = HbType.read, color = palette.textDim, modifier = Modifier.padding(horizontal = 12.dp)) }
+            replyTarget?.let { target ->
+                HbGlassButton((if (settings.locale == "tr") "Yanıt: " else "Replying to: ") + roomName(target.speaker ?: state.room?.lead ?: agentId) + " ×", onClick = { replyTarget = null })
+            }
             PendingAsksTray(
                 config = config,
                 api = graph.api,
@@ -346,6 +364,8 @@ fun ChatScreen(
             )
 
             Composer(
+                draftScope = listOf(config, viewScope),
+                onSteer = { vm.steer(it) },
                 replyQuotes = replyQuotes,
                 onRemoveQuote = { index -> replyQuotes = replyQuotes.filterIndexed { i, _ -> i != index } },
                 isStreaming = state.isStreaming,
@@ -370,7 +390,10 @@ fun ChatScreen(
                     models = models.map {
                         if (it.id == modelId) it.copy(thinking = level, thinkingPinned = true) else it
                     }
-                    scope.launch { graph.api.setModelThinking(config, modelId, level) }
+                    scope.launch {
+                        graph.api.setModelThinking(config, modelId, level)
+                        models = graph.api.fetchModels(config)
+                    }
                 },
                 language = settings.locale,
                 onLanguageChange = { next ->
@@ -378,28 +401,27 @@ fun ChatScreen(
                         // Local half first, so the interface has already changed
                         // language before the request lands.
                         graph.settings.setLocale(next)
-                        // Backend half — `agent_language` is what stamps the hard
-                        // contract into every agent's system prompt and what the
-                        // speech locales are derived from. Best-effort on the
-                        // same terms as the desktop: a failed PUT leaves the
-                        // agent writing the previous language until the next
-                        // attempt, which is visible on the very next reply.
-                        graph.api.saveConfig(config, mapOf("agent_language" to JsonPrimitive(next)))
+                        // Stage the backend preference; Configuration provides the
+                        // explicit restart action. Local speech uses its own locale.
+                        graph.api.saveConfigPreferences(config, mapOf("agent_language" to JsonPrimitive(next)))
                     }
                 },
                 onSend = { text, images, docs ->
                     val contextualText = if (replyQuotes.isEmpty()) text else
                         "Reply context (selected chat excerpts):\n" + replyQuotes.joinToString("\n\n") { quote -> quote.lines().joinToString("\n") { "> $it" } } + "\n\n" + text
-                    replyQuotes = emptyList()
-                    vm.send(
+                    val accepted = vm.send(
                         contextualText,
                         IgorApi.StreamOpts(
                             model = settings.model.ifEmpty { null },
                             systemPrompt = settings.systemPrompt.ifBlank { null },
                             images = images,
                             documents = docs,
+                            addressedAgentId = addressedAgent ?: replyTarget?.speaker,
+                            replyTo = replyTarget?.roomSequence,
                         ),
                     )
+                    if (accepted) { replyQuotes = emptyList(); replyTarget = null }
+                    accepted
                 },
                 onStop = { vm.stop() },
                 modifier = Modifier.navigationBarsPadding(),
@@ -430,6 +452,8 @@ fun ChatScreen(
             onToggleComms = { drawerOpen = false; commsOpen = true },
             onToggleBoard = { drawerOpen = false; boardOpen = true },
         )
+        if (roomActions) RoomActions(state.room, state.isStreaming || membershipBusy, roomError, settings.locale == "tr",
+            { action, id -> vm.changeMember(action, id) }, { roomActions = false })
 
         // Full-screen projects sheet; back closes it, exactly like settings.
         if (projectsOpen) {
